@@ -1,0 +1,363 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  /* Italian tricolor */
+  --it-green:  #009246;
+  --it-white:  #ffffff;
+  --it-red:    #ce2b37;
+
+  /* Core palette — black & white */
+  --black:     #0a0a0a;
+  --off-black: #1a1a1a;
+  --charcoal:  #2e2e2e;
+  --mid:       #666;
+  --light:     #ccc;
+  --border:    #e0e0e0;
+  --bg:        #f5f5f5;
+  --card:      #ffffff;
+
+  /* Category colours (keep vivid for legibility on white) */
+  --cat-hc:   #7b2d8b;
+  --cat-1:    #c0392b;
+  --cat-2:    #e67e22;
+  --cat-3:    #27ae60;
+  --cat-4:    #2980b9;
+  --cat-none: #888;
+
+  /* Danger */
+  --red: #ce2b37;
+
+  --no-upload: #fde8ea;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg);
+  color: var(--black);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ── Navigation ─────────────────────────────────────────────────────────────── */
+
+nav {
+  background: var(--black);
+  display: flex;
+  align-items: center;
+  height: 64px;
+  padding: 0 20px;
+  gap: 4px;
+  position: relative;
+  box-shadow: 0 2px 8px rgba(0,0,0,.4);
+}
+
+/* Italian flag stripe at bottom of nav */
+nav::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(to right,
+    var(--it-green)  0%   33.33%,
+    var(--it-white)  33.33% 66.66%,
+    var(--it-red)    66.66% 100%
+  );
+}
+
+.nav-logo {
+  height: 48px;
+  width: auto;
+  margin-right: 16px;
+  object-fit: contain;
+  border-radius: 3px;
+}
+
+.nav-logo-text {
+  display: flex;
+  flex-direction: column;
+  margin-right: 20px;
+  line-height: 1.1;
+}
+.nav-logo-text .brand-main {
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+.nav-logo-text .brand-sub {
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--it-green);
+  font-weight: 600;
+}
+
+/* divider between logo and nav links */
+.nav-divider {
+  width: 1px;
+  height: 32px;
+  background: var(--charcoal);
+  margin: 0 8px 0 0;
+}
+
+nav a {
+  color: rgba(255,255,255,.7);
+  text-decoration: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  transition: background .15s, color .15s;
+}
+nav a:hover { color: #fff; background: rgba(255,255,255,.08); }
+nav a.active { color: #fff; background: rgba(255,255,255,.14); }
+
+/* ── Page layout ────────────────────────────────────────────────────────────── */
+
+.page {
+  max-width: 1140px;
+  margin: 0 auto;
+  padding: 28px 20px;
+}
+
+h1 { font-size: 22px; margin-bottom: 20px; color: var(--black); }
+h2 { font-size: 16px; margin-bottom: 12px; }
+
+/* ── Cards ──────────────────────────────────────────────────────────────────── */
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+/* Italian accent bar on left of card */
+.card-accent {
+  border-left: 4px solid;
+  border-image: linear-gradient(to bottom, var(--it-green), var(--it-white), var(--it-red)) 1;
+}
+
+/* ── Tables ─────────────────────────────────────────────────────────────────── */
+
+table { width: 100%; border-collapse: collapse; }
+
+th, td {
+  text-align: left;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+th {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--mid);
+  background: var(--bg);
+  font-weight: 700;
+}
+
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #fafafa; }
+
+/* ── Badges ─────────────────────────────────────────────────────────────────── */
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  color: #fff;
+}
+
+.badge-HC   { background: var(--cat-hc); }
+.badge-1    { background: var(--cat-1); }
+.badge-2    { background: var(--cat-2); }
+.badge-3    { background: var(--cat-3); }
+.badge-4    { background: var(--cat-4); }
+.badge-none { background: var(--cat-none); }
+
+.rank-medal { font-size: 16px; }
+
+.row-no-upload { background: var(--no-upload) !important; color: #aaa; }
+
+/* ── Buttons ────────────────────────────────────────────────────────────────── */
+
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: opacity .15s;
+}
+button:hover { opacity: .85; }
+button:disabled { opacity: .4; cursor: not-allowed; }
+
+.btn-primary   { background: var(--black); color: #fff; }
+.btn-secondary { background: var(--border); color: var(--black); }
+.btn-danger    { background: var(--red); color: #fff; }
+.btn-small     { padding: 4px 10px; font-size: 12px; }
+
+/* ── Inputs ─────────────────────────────────────────────────────────────────── */
+
+input[type="date"],
+input[type="number"],
+input[type="text"],
+select {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 13px;
+  background: #fff;
+  color: var(--black);
+  outline: none;
+  transition: border-color .15s;
+}
+input:focus, select:focus { border-color: var(--black); }
+
+label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--mid);
+  display: block;
+  margin-bottom: 4px;
+}
+
+/* ── Filters bar ────────────────────────────────────────────────────────────── */
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-end;
+  margin-bottom: 20px;
+  padding: 16px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.filter-group { display: flex; flex-direction: column; }
+
+/* ── Stat cards ─────────────────────────────────────────────────────────────── */
+
+.stat-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.stat {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 20px;
+  min-width: 140px;
+  border-top: 3px solid var(--black);
+}
+
+.stat-value { font-size: 28px; font-weight: 700; color: var(--black); }
+.stat-label { font-size: 11px; color: var(--mid); margin-top: 2px; text-transform: uppercase; letter-spacing: .05em; }
+
+/* ── Utility ────────────────────────────────────────────────────────────────── */
+
+.error  { color: var(--red); font-size: 13px; margin-top: 8px; }
+.muted  { color: var(--mid); }
+.mt     { margin-top: 16px; }
+.mb     { margin-bottom: 16px; }
+.gap    { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ── Progress bar ───────────────────────────────────────────────────────────── */
+
+.progress-bar-wrap {
+  background: var(--border);
+  border-radius: 4px;
+  height: 6px;
+  overflow: hidden;
+  margin-top: 6px;
+}
+.progress-bar {
+  background: linear-gradient(to right, var(--it-green), var(--it-white), var(--it-red));
+  height: 100%;
+  transition: width .3s;
+}
+
+/* ── Leaderboard ────────────────────────────────────────────────────────────── */
+
+.leaderboard-rank-1 td:first-child { font-size: 20px; }
+.leaderboard-rank-2 td:first-child { font-size: 18px; }
+.leaderboard-rank-3 td:first-child { font-size: 16px; }
+
+.points-value { font-size: 18px; font-weight: 800; color: var(--black); }
+
+/* ── Segment / climb rows ───────────────────────────────────────────────────── */
+
+.segment-row { cursor: pointer; }
+.segment-row:hover td { background: #f0f0f0; }
+.segment-row.selected td { background: #ebebeb; font-weight: 600; }
+
+/* ── Event blocks ───────────────────────────────────────────────────────────── */
+
+.events-list { margin-top: 0; }
+.event-block { margin-bottom: 16px; }
+.event-date {
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--mid);
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ── Strava connect button ──────────────────────────────────────────────────── */
+
+.strava-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--black);
+  color: #fff;
+  padding: 12px 24px;
+  border-radius: 6px;
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+  margin-top: 16px;
+  border: 2px solid transparent;
+  transition: border-color .15s;
+}
+.strava-btn:hover { border-color: var(--it-green); }
+
+/* ── Italian flag divider (reusable) ────────────────────────────────────────── */
+
+.tricolor-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(to right,
+    var(--it-green)  0%   33.33%,
+    var(--it-white)  33.33% 66.66%,
+    var(--it-red)    66.66% 100%
+  );
+  margin: 20px 0;
+  border: 1px solid var(--border);
+}
+
+/* ── Polka dot (KOM jersey nod) ─────────────────────────────────────────────── */
+
+.polka-dot {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--it-red);
+  margin-right: 3px;
+}
