@@ -66,7 +66,7 @@ const createTables = () => {
 };
 
 const migrateSchema = () => {
-  // Add difficulty_score and category columns to segments if missing
+  // Add difficulty_score, category and starred columns to segments if missing
   const segmentCols = db.prepare('PRAGMA table_info(segments)').all().map(c => c.name);
   let needsRecompute = false;
   if (!segmentCols.includes('difficulty_score')) {
@@ -76,6 +76,9 @@ const migrateSchema = () => {
   if (!segmentCols.includes('category')) {
     db.exec('ALTER TABLE segments ADD COLUMN category TEXT');
     needsRecompute = true;
+  }
+  if (!segmentCols.includes('starred')) {
+    db.exec('ALTER TABLE segments ADD COLUMN starred INTEGER DEFAULT 0');
   }
 
   // Create category_config (replaces climb_config)
@@ -277,6 +280,11 @@ const insertOrUpdateSegment = (segment) => {
 
 const getSegmentById = (id) => db.prepare('SELECT * FROM segments WHERE id = ?').get(id);
 
+const toggleSegmentStar = (id) => {
+  db.prepare('UPDATE segments SET starred = CASE WHEN starred = 1 THEN 0 ELSE 1 END WHERE id = ?').run(id);
+  return getSegmentById(id);
+};
+
 const getQualifyingSegments = () =>
   db.prepare(`
     SELECT s.*,
@@ -379,13 +387,14 @@ const getGroupRides = (from, to, minRiders) =>
     ORDER BY ride_date DESC, rider_count DESC
   `).all(from, to, minRiders);
 
-const getLeaderboard = (from, to, minRiders) =>
+const getLeaderboard = (from, to, minRiders, starredOnly = false) =>
   db.prepare(`
     WITH scoring_events AS (
       SELECT se.segment_id, date(se.start_date) AS ride_date
       FROM segment_efforts se
       JOIN segments s ON s.id = se.segment_id
       WHERE s.category IS NOT NULL
+        ${starredOnly ? 'AND s.starred = 1' : ''}
         AND date(se.start_date) BETWEEN ? AND ?
       GROUP BY se.segment_id, date(se.start_date)
       HAVING COUNT(DISTINCT se.rider_id) >= ?
@@ -458,6 +467,7 @@ module.exports = {
   replacePointsForCategory,
   getQualifyingSegments,
   getSegmentById,
+  toggleSegmentStar,
   getClimbRanking,
   getGroupRides,
   getLeaderboard,

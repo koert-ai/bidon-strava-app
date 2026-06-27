@@ -30,6 +30,8 @@ export const updatePointsForCategory = (category, points) =>
 
 // Segments
 export const getQualifyingSegments = () => req('/segments/qualifying');
+export const toggleStar = (segmentId) =>
+  req(`/segments/${segmentId}/star`, { method: 'POST' });
 
 // Climbs
 export const getClimbRanking = (segmentId, from, to, minRiders = 1) =>
@@ -39,5 +41,5 @@ export const getGroupRides = (from, to, minRiders = 1) =>
   req(`/climbs/group-rides?from=${from}&to=${to}&minRiders=${minRiders}`);
 
 // Leaderboard
-export const getLeaderboard = (from, to, minRiders = 1) =>
-  req(`/points/leaderboard?from=${from}&to=${to}&minRiders=${minRiders}`);
+export const getLeaderboard = (from, to, minRiders = 1, starredOnly = false) =>
+  req(`/points/leaderboard?from=${from}&to=${to}&minRiders=${minRiders}&starredOnly=${starredOnly}`);

@@ -15,6 +15,7 @@ export default function Leaderboard() {
   const [from, setFrom] = useState(yearAgo());
   const [to, setTo] = useState(today());
   const [minRiders, setMinRiders] = useState(1);
+  const [starredOnly, setStarredOnly] = useState(false);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -23,7 +24,7 @@ export default function Leaderboard() {
     setLoading(true);
     setError(null);
     try {
-      const result = await getLeaderboard(from, to, minRiders);
+      const result = await getLeaderboard(from, to, minRiders, starredOnly);
       setData(result);
     } catch (err) {
       setError(err.message);
@@ -60,6 +61,12 @@ export default function Leaderboard() {
             onChange={e => setMinRiders(Number(e.target.value))}
             style={{ width: 70 }}
           />
+        </div>
+        <div className="filter-group" style={{ alignSelf: 'flex-end' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+            <input type="checkbox" checked={starredOnly} onChange={e => setStarredOnly(e.target.checked)} />
+            ★ Starred climbs only
+          </label>
         </div>
         <button className="btn-primary" onClick={load} disabled={loading}>
           {loading ? 'Loading…' : 'Apply'}

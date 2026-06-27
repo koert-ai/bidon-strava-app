@@ -9,7 +9,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <nav>
-        <img src="/logo.png" alt="De Gevulde Bidon" className="nav-logo" />
+        <img src="/logo.jpg" alt="De Gevulde Bidon" className="nav-logo" />
         <div className="nav-divider" />
         <NavLink to="/">Connect</NavLink>
         <NavLink to="/config/climbs">Climb Config</NavLink>

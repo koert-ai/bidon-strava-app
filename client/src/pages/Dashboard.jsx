@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getQualifyingSegments, getClimbRanking } from '../api.js';
+import { getQualifyingSegments, getClimbRanking, toggleStar } from '../api.js';
 
 const MEDAL = ['🥇', '🥈', '🥉'];
 
@@ -50,11 +50,20 @@ export default function Dashboard() {
     loadRanking(seg.id);
   };
 
+  const handleStar = async (e, segId) => {
+    e.stopPropagation();
+    const result = await toggleStar(segId);
+    setSegments(prev => prev.map(s => s.id === segId ? { ...s, starred: result.starred } : s));
+  };
+
   const handleFilterChange = () => {
     if (selected) loadRanking(selected);
   };
 
+  const [starredOnly, setStarredOnly] = useState(false);
+
   const filtered = segments.filter(s => {
+    if (starredOnly && !s.starred) return false;
     if (filterCat === 'all') return true;
     if (filterCat === 'categorized') return s.category != null;
     if (filterCat === 'uncategorized') return s.category == null;
@@ -92,6 +101,12 @@ export default function Dashboard() {
             <option value="uncategorized">Uncategorised</option>
           </select>
         </div>
+        <div className="filter-group" style={{ alignSelf: 'flex-end' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+            <input type="checkbox" checked={starredOnly} onChange={e => setStarredOnly(e.target.checked)} />
+            Starred only
+          </label>
+        </div>
         <div className="filter-group">
           <label>Sort by</label>
           <select value={sortBy} onChange={e => setSortBy(e.target.value)}>
@@ -126,6 +141,7 @@ export default function Dashboard() {
           <table>
             <thead>
               <tr>
+                <th style={{ width: 36 }}>★</th>
                 <th>Climb</th>
                 <th>Cat</th>
                 <th>Score</th>
@@ -142,6 +158,19 @@ export default function Dashboard() {
                   className={`segment-row${selected === seg.id ? ' selected' : ''}`}
                   onClick={() => handleSelectSegment(seg)}
                 >
+                  <td style={{ textAlign: 'center' }}>
+                    <button
+                      className="star-btn"
+                      title={seg.starred ? 'Unstar' : 'Star this climb'}
+                      onClick={e => handleStar(e, seg.id)}
+                      style={{
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        fontSize: 16, color: seg.starred ? '#f0a500' : '#ccc', padding: 0,
+                      }}
+                    >
+                      {seg.starred ? '★' : '☆'}
+                    </button>
+                  </td>
                   <td style={{ fontWeight: 600 }}>{seg.name}</td>
                   <td>
                     <span className={`badge badge-${seg.category || 'none'}`}>
@@ -156,7 +185,7 @@ export default function Dashboard() {
                 </tr>
               ))}
               {sorted.length === 0 && (
-                <tr><td colSpan={7} className="muted" style={{ textAlign: 'center', padding: 20 }}>No segments found</td></tr>
+                <tr><td colSpan={8} className="muted" style={{ textAlign: 'center', padding: 20 }}>No segments found</td></tr>
               )}
             </tbody>
           </table>
