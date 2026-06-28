@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getStravaLoginUrl, getSyncStatus, triggerBackfill } from '../api.js';
+import { getStravaLoginUrl, getSyncStatus, triggerBackfill, clearRiderData } from '../api.js';
 
 const getAllStatus = () => fetch('/api/sync/status/all').then(r => r.json());
 
@@ -7,6 +7,7 @@ export default function Connect() {
   const [riders, setRiders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [backfilling, setBackfilling] = useState(null); // riderId being backfilled
+  const [clearing, setClearing] = useState(null); // riderId being cleared
   const [errors, setErrors] = useState({});
   const [justConnected, setJustConnected] = useState(null); // name from URL
 
@@ -39,6 +40,20 @@ export default function Connect() {
     const interval = setInterval(fetchAll, 3000);
     return () => clearInterval(interval);
   }, [backfilling]);
+
+  const handleClear = async (riderId, riderName) => {
+    if (!window.confirm(`Remove all Strava data for ${riderName}? This cannot be undone.`)) return;
+    setClearing(riderId);
+    setErrors(e => ({ ...e, [riderId]: null }));
+    try {
+      await clearRiderData(riderId);
+      await fetchAll();
+    } catch (err) {
+      setErrors(e => ({ ...e, [riderId]: err.message }));
+    } finally {
+      setClearing(null);
+    }
+  };
 
   const handleBackfill = async (riderId) => {
     setBackfilling(riderId);
@@ -91,39 +106,64 @@ export default function Connect() {
                 <th>Rider</th>
                 <th>Activities</th>
                 <th>Segment efforts</th>
-                <th>Backfill</th>
-                <th></th>
+                <th>Sync status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {riders.map(({ rider, sync_state, activity_count, segment_effort_count }) => (
+              {riders.map(({ rider, sync_state, activity_count, segment_effort_count }) => {
+                const lastSynced = sync_state.last_synced_at
+                  ? new Date(sync_state.last_synced_at * 1000).toLocaleString()
+                  : null;
+                const isBusy = backfilling !== null || clearing !== null;
+                return (
                 <tr key={rider.id}>
                   <td style={{ fontWeight: 600 }}>{rider.name}</td>
                   <td>{activity_count.toLocaleString()}</td>
                   <td>{segment_effort_count.toLocaleString()}</td>
                   <td>
-                    {sync_state.backfill_complete
-                      ? <span style={{ color: 'var(--it-green)', fontWeight: 700 }}>✓ Complete</span>
-                      : backfilling === rider.id
-                        ? <span className="muted">Running (page {sync_state.last_page_fetched})…</span>
-                        : <span className="muted">Not started</span>}
+                    {sync_state.backfill_complete ? (
+                      <span style={{ color: 'var(--it-green)', fontWeight: 700 }}>
+                        ✓ Synced{lastSynced ? ` · ${lastSynced}` : ''}
+                      </span>
+                    ) : backfilling === rider.id ? (
+                      <span className="muted">Syncing (page {sync_state.last_page_fetched})…</span>
+                    ) : activity_count > 0 ? (
+                      <span className="muted">
+                        Partial · last page {sync_state.last_page_fetched}
+                        {lastSynced ? ` · ${lastSynced}` : ''}
+                      </span>
+                    ) : (
+                      <span className="muted">Not started</span>
+                    )}
                   </td>
-                  <td>
+                  <td style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                     {!sync_state.backfill_complete && (
                       <button
                         className="btn-primary btn-small"
                         onClick={() => handleBackfill(rider.id)}
-                        disabled={backfilling !== null}
+                        disabled={isBusy}
                       >
-                        {backfilling === rider.id ? 'Running…' : 'Start backfill'}
+                        {backfilling === rider.id ? 'Syncing…' : 'Start sync'}
+                      </button>
+                    )}
+                    {activity_count > 0 && (
+                      <button
+                        className="btn-small"
+                        style={{ color: 'var(--danger, #c0392b)', borderColor: 'var(--danger, #c0392b)' }}
+                        onClick={() => handleClear(rider.id, rider.name)}
+                        disabled={isBusy}
+                      >
+                        {clearing === rider.id ? 'Clearing…' : 'Clear data'}
                       </button>
                     )}
                     {errors[rider.id] && (
-                      <span className="error" style={{ marginLeft: 8 }}>{errors[rider.id]}</span>
+                      <span className="error">{errors[rider.id]}</span>
                     )}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

@@ -285,8 +285,33 @@ const toggleSegmentStar = (id) => {
   return getSegmentById(id);
 };
 
-const getQualifyingSegments = () =>
-  db.prepare(`
+const getQualifyingSegments = (from = null, to = null, minRiders = 1) => {
+  if (from && to) {
+    // Only return segments that had a group ride (≥ minRiders on the same day) in the date range
+    return db.prepare(`
+      SELECT s.*,
+             COUNT(se.id) AS effort_count
+      FROM segments s
+      JOIN segment_efforts se ON se.segment_id = s.id
+      WHERE date(se.start_date) BETWEEN ? AND ?
+      GROUP BY s.id
+      HAVING COUNT(DISTINCT CASE WHEN date(se.start_date) IN (
+        SELECT date(se2.start_date)
+        FROM segment_efforts se2
+        WHERE se2.segment_id = s.id
+          AND date(se2.start_date) BETWEEN ? AND ?
+        GROUP BY date(se2.start_date)
+        HAVING COUNT(DISTINCT se2.rider_id) >= ?
+      ) THEN 1 END) > 0
+      ORDER BY
+        CASE s.category
+          WHEN 'HC' THEN 0 WHEN '1' THEN 1 WHEN '2' THEN 2
+          WHEN '3' THEN 3 WHEN '4' THEN 4 ELSE 5
+        END,
+        s.difficulty_score DESC
+    `).all(from, to, from, to, minRiders);
+  }
+  return db.prepare(`
     SELECT s.*,
            COUNT(se.id) AS effort_count
     FROM segments s
@@ -299,6 +324,7 @@ const getQualifyingSegments = () =>
       END,
       s.difficulty_score DESC
   `).all();
+};
 
 // ── Segment efforts ────────────────────────────────────────────────────────────
 
@@ -353,6 +379,15 @@ const getClimbRanking = (segmentId, from, to, minRiders) => {
     ORDER BY b.ride_date DESC, rank_pos
   `).all(segmentId, ...dates);
 
+  // All-time best per rider on this segment (for PR detection)
+  const allTimeBests = db.prepare(`
+    SELECT rider_id, MIN(elapsed_time_s) AS all_time_best
+    FROM segment_efforts
+    WHERE segment_id = ?
+    GROUP BY rider_id
+  `).all(segmentId);
+  const allTimeBestMap = Object.fromEntries(allTimeBests.map(r => [r.rider_id, r.all_time_best]));
+
   const ptsRows = segment.category
     ? db.prepare('SELECT rank, points FROM points_config WHERE category = ?').all(segment.category)
     : [];
@@ -368,6 +403,7 @@ const getClimbRanking = (segmentId, from, to, minRiders) => {
       elapsed_time_s: e.best_time,
       rank: e.rank_pos,
       points: ptsMap[e.rank_pos] || 0,
+      is_pr: e.best_time === allTimeBestMap[e.rider_id],
     });
   }
 

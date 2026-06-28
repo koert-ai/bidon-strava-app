@@ -17,6 +17,8 @@ export const getStravaLoginUrl = () => `${BASE}/auth/strava/login`;
 export const getSyncStatus = (riderId) => req(`/sync/status/${riderId}`);
 export const triggerBackfill = (riderId) =>
   req(`/sync/backfill/${riderId}`, { method: 'POST' });
+export const clearRiderData = (riderId) =>
+  req(`/sync/data/${riderId}`, { method: 'DELETE' });
 
 // Config — categories
 export const getCategoryConfig = () => req('/config/categories');
@@ -29,7 +31,13 @@ export const updatePointsForCategory = (category, points) =>
   req(`/config/points/${category}`, { method: 'PUT', body: JSON.stringify({ points }) });
 
 // Segments
-export const getQualifyingSegments = () => req('/segments/qualifying');
+export const getQualifyingSegments = (from = null, to = null, minRiders = 1) => {
+  const params = new URLSearchParams();
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  params.set('minRiders', minRiders);
+  return req(`/segments/qualifying?${params}`);
+};
 export const toggleStar = (segmentId) =>
   req(`/segments/${segmentId}/star`, { method: 'POST' });
 

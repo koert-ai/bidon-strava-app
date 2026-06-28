@@ -16,10 +16,14 @@ const router = express.Router();
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const CYCLING_TYPES = new Set(['ride', 'virtualride', 'ebikeride', 'handcycle', 'velomobile']);
+
 const normalizeType = (activity) => {
   const type = activity.type || activity.sport_type || '';
   return String(type).toLowerCase();
 };
+
+const isCyclingActivity = (activity) => CYCLING_TYPES.has(normalizeType(activity));
 
 const mapActivity = (activity, riderId) => ({
   id: activity.id,
@@ -87,7 +91,7 @@ router.post('/backfill/:riderId', async (req, res, next) => {
       });
 
       const rideActivities = Array.isArray(activityList)
-        ? activityList.filter((activity) => normalizeType(activity) === 'ride')
+        ? activityList.filter(isCyclingActivity)
         : [];
 
       if (activityList.length === 0 || rideActivities.length === 0) {
@@ -159,6 +163,23 @@ router.post('/backfill/:riderId', async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+});
+
+router.delete('/data/:riderId', (req, res, next) => {
+  try {
+    const riderId = Number(req.params.riderId);
+    const rider = getRiderById(riderId);
+    if (!rider) return res.status(404).json({ error: 'Rider not found' });
+
+    const { db } = require('../db');
+    db.transaction(() => {
+      db.prepare('DELETE FROM segment_efforts WHERE rider_id = ?').run(riderId);
+      db.prepare('DELETE FROM activities WHERE rider_id = ?').run(riderId);
+      db.prepare('DELETE FROM sync_state WHERE rider_id = ?').run(riderId);
+    })();
+
+    res.json({ message: 'Data cleared' });
+  } catch (err) { next(err); }
 });
 
 router.get('/status/all', (req, res, next) => {

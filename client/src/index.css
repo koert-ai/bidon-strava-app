@@ -6,7 +6,7 @@
   --it-white:  #ffffff;
   --it-red:    #ce2b37;
 
-  /* Core palette — black & white */
+  /* Core palette — light mode */
   --black:     #0a0a0a;
   --off-black: #1a1a1a;
   --charcoal:  #2e2e2e;
@@ -15,8 +15,9 @@
   --border:    #e0e0e0;
   --bg:        #f5f5f5;
   --card:      #ffffff;
+  --orange:    #e67e22;
 
-  /* Category colours (keep vivid for legibility on white) */
+  /* Category colours */
   --cat-hc:   #7b2d8b;
   --cat-1:    #c0392b;
   --cat-2:    #e67e22;
@@ -28,6 +29,40 @@
   --red: #ce2b37;
 
   --no-upload: #fde8ea;
+
+  /* Skeleton */
+  --skeleton-base:    #e0e0e0;
+  --skeleton-shine:   #f0f0f0;
+}
+
+/* ── Dark mode ───────────────────────────────────────────────────────────── */
+
+html.dark {
+  --black:     #f0f0f0;
+  --off-black: #e0e0e0;
+  --charcoal:  #c0c0c0;
+  --mid:       #999;
+  --light:     #555;
+  --border:    #333;
+  --bg:        #0f0f0f;
+  --card:      #1a1a1a;
+  --no-upload: #3a1a1e;
+  --skeleton-base:  #2a2a2a;
+  --skeleton-shine: #333;
+}
+
+html.dark nav { background: #111; }
+html.dark th  { background: #111; }
+html.dark tr:hover td { background: #222; }
+html.dark .segment-row:hover td { background: #222; }
+html.dark .segment-row.selected td { background: #2a2a2a; }
+html.dark input[type="date"],
+html.dark input[type="number"],
+html.dark input[type="text"],
+html.dark select {
+  background: #1a1a1a;
+  color: var(--black);
+  border-color: var(--border);
 }
 
 body {
@@ -360,4 +395,114 @@ label {
   border-radius: 50%;
   background: var(--it-red);
   margin-right: 3px;
+}
+
+/* ── PR badge ────────────────────────────────────────────────────────────── */
+
+.pr-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  background: var(--it-green);
+  color: #fff;
+  vertical-align: middle;
+}
+
+/* ── Strava segment link ─────────────────────────────────────────────────── */
+
+.strava-segment-link {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fc4c02;
+  text-decoration: none;
+  padding: 4px 8px;
+  border: 1px solid #fc4c0240;
+  border-radius: 4px;
+  transition: background .15s;
+  white-space: nowrap;
+}
+.strava-segment-link:hover { background: #fc4c0212; }
+
+/* ── Dark mode toggle ────────────────────────────────────────────────────── */
+
+.dark-toggle {
+  background: none;
+  border: 1px solid rgba(255,255,255,.2);
+  color: #fff;
+  padding: 5px 9px;
+  font-size: 15px;
+  border-radius: 6px;
+  line-height: 1;
+}
+.dark-toggle:hover { background: rgba(255,255,255,.1); opacity: 1; }
+
+/* ── Skeleton loader ─────────────────────────────────────────────────────── */
+
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--skeleton-base) 25%, var(--skeleton-shine) 50%, var(--skeleton-base) 75%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: 4px;
+}
+
+.skeleton-title { height: 20px; width: 70%; margin-bottom: 10px; }
+.skeleton-text  { height: 13px; margin-bottom: 6px; }
+
+/* ── Dashboard grid ──────────────────────────────────────────────────────── */
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+}
+.dashboard-grid[data-split="true"] {
+  grid-template-columns: 1fr 1fr;
+}
+
+/* ── Mobile responsive ───────────────────────────────────────────────────── */
+
+@media (max-width: 900px) {
+  .dashboard-grid[data-split="true"] {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  nav {
+    height: auto;
+    flex-wrap: wrap;
+    padding: 10px 12px;
+    gap: 6px;
+  }
+
+  .nav-logo { height: 36px; }
+  .nav-divider { display: none; }
+
+  nav a {
+    font-size: 12px;
+    padding: 5px 8px;
+  }
+
+  .page { padding: 16px 12px; }
+
+  .filters {
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .stat-row { flex-direction: column; }
+
+  table { font-size: 12px; }
+  th, td { padding: 7px 6px; }
 }

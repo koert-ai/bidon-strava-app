@@ -13,12 +13,41 @@ const fmtTime = (s) => {
 
 const fmtScore = (score) => score != null ? score.toFixed(1) : '—';
 
+const fmtVam = (elevM, elapsedS) => {
+  if (!elevM || !elapsedS) return '—';
+  return Math.round((elevM / elapsedS) * 3600);
+};
+
 const today = () => new Date().toISOString().slice(0, 10);
 const yearAgo = () => {
   const d = new Date();
   d.setFullYear(d.getFullYear() - 1);
   return d.toISOString().slice(0, 10);
 };
+
+function RankingSkeleton() {
+  return (
+    <div>
+      <div className="card skeleton-card" style={{ marginBottom: 12 }}>
+        <div className="skeleton skeleton-title" />
+        <div className="skeleton skeleton-text" style={{ width: '60%' }} />
+      </div>
+      {[1, 2].map(i => (
+        <div className="card" key={i} style={{ marginBottom: 12 }}>
+          <div className="skeleton skeleton-text" style={{ width: '40%', marginBottom: 12 }} />
+          {[1, 2, 3].map(j => (
+            <div key={j} style={{ display: 'flex', gap: 12, marginBottom: 8 }}>
+              <div className="skeleton" style={{ width: 28, height: 14, borderRadius: 4 }} />
+              <div className="skeleton" style={{ flex: 1, height: 14, borderRadius: 4 }} />
+              <div className="skeleton" style={{ width: 60, height: 14, borderRadius: 4 }} />
+              <div className="skeleton" style={{ width: 40, height: 14, borderRadius: 4 }} />
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const [segments, setSegments] = useState([]);
@@ -30,13 +59,19 @@ export default function Dashboard() {
   const [loadingRanking, setLoadingRanking] = useState(false);
   const [filterCat, setFilterCat] = useState('all');
   const [sortBy, setSortBy] = useState('category');
+  const [starredOnly, setStarredOnly] = useState(false);
+
+  const loadSegments = (f = from, t = to, mr = minRiders) => {
+    getQualifyingSegments(f, t, mr).then(setSegments);
+  };
 
   useEffect(() => {
-    getQualifyingSegments().then(setSegments);
-  }, []);
+    loadSegments();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadRanking = async (segId) => {
     setLoadingRanking(true);
+    setRanking(null);
     try {
       const data = await getClimbRanking(segId, from, to, minRiders);
       setRanking(data);
@@ -57,10 +92,9 @@ export default function Dashboard() {
   };
 
   const handleFilterChange = () => {
+    loadSegments(from, to, minRiders);
     if (selected) loadRanking(selected);
   };
-
-  const [starredOnly, setStarredOnly] = useState(false);
 
   const filtered = segments.filter(s => {
     if (starredOnly && !s.starred) return false;
@@ -75,7 +109,6 @@ export default function Dashboard() {
     if (sortBy === 'score') return (b.difficulty_score || 0) - (a.difficulty_score || 0);
     if (sortBy === 'distance') return (b.distance_m || 0) - (a.distance_m || 0);
     if (sortBy === 'elevation') return (b.elevation_gain_m || 0) - (a.elevation_gain_m || 0);
-    // default: category order
     const catOrder = { HC: 0, '1': 1, '2': 2, '3': 3, '4': 4 };
     const ao = catOrder[a.category] ?? 5;
     const bo = catOrder[b.category] ?? 5;
@@ -131,12 +164,12 @@ export default function Dashboard() {
             onChange={e => setMinRiders(Number(e.target.value))}
             style={{ width: 70 }} />
         </div>
-        <button className="btn-primary" onClick={handleFilterChange} disabled={!selected || loadingRanking}>
-          {!selected ? 'Select a climb first' : loadingRanking ? 'Loading…' : 'Apply filter'}
+        <button className="btn-primary" onClick={handleFilterChange} disabled={loadingRanking}>
+          {loadingRanking ? 'Loading…' : 'Apply filter'}
         </button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: selected ? '1fr 1fr' : '1fr', gap: 20 }}>
+      <div className="dashboard-grid" data-split={selected ? 'true' : 'false'}>
         <div className="card" style={{ padding: 0, overflow: 'auto' }}>
           <table>
             <thead>
@@ -193,18 +226,34 @@ export default function Dashboard() {
 
         {selected && (
           <div>
-            {loadingRanking && <p className="muted">Loading ranking…</p>}
+            {loadingRanking && <RankingSkeleton />}
             {ranking && !loadingRanking && (
               <>
                 <div className="card" style={{ marginBottom: 12 }}>
-                  <h2>{ranking.segment.name}</h2>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+                    <h2 style={{ marginBottom: 4 }}>{ranking.segment.name}</h2>
+                    <a
+                      href={`https://www.strava.com/segments/${ranking.segment.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="strava-segment-link"
+                      onClick={e => e.stopPropagation()}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 4 }}>
+                        <path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066l-2.084 4.116z"/>
+                        <path d="M9.664 14.093L6.6 8.592H3.533L9.664 20.87l3.064-6.085h-3.065l-.001-.692z"/>
+                      </svg>
+                      View on Strava
+                    </a>
+                  </div>
                   <p className="muted" style={{ fontSize: 12 }}>
                     <span className={`badge badge-${ranking.segment.category || 'none'}`} style={{ marginRight: 6 }}>
                       {ranking.segment.category ? (ranking.segment.category === 'HC' ? 'HC' : `Cat ${ranking.segment.category}`) : 'Uncat'}
                     </span>
                     Score: {fmtScore(ranking.segment.difficulty_score)} ·
                     {ranking.segment.distance_m ? ` ${(ranking.segment.distance_m / 1000).toFixed(1)} km` : ''} ·
-                    {ranking.segment.average_grade != null ? ` avg ${ranking.segment.average_grade.toFixed(1)}%` : ''}
+                    {ranking.segment.average_grade != null ? ` avg ${ranking.segment.average_grade.toFixed(1)}%` : ''} ·
+                    {ranking.segment.elevation_gain_m != null ? ` ${Math.round(ranking.segment.elevation_gain_m)} m elev` : ''}
                   </p>
                 </div>
 
@@ -227,6 +276,7 @@ export default function Dashboard() {
                               <th>Rank</th>
                               <th>Rider</th>
                               <th>Time</th>
+                              <th title="Vertical Ascent Metres per hour">VAM</th>
                               <th>Points</th>
                             </tr>
                           </thead>
@@ -237,7 +287,16 @@ export default function Dashboard() {
                                   <span className="rank-medal">{MEDAL[r.rank - 1] || `#${r.rank}`}</span>
                                 </td>
                                 <td>{r.name}</td>
-                                <td style={{ fontFamily: 'monospace' }}>{fmtTime(r.elapsed_time_s)}</td>
+                                <td style={{ fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                                  {fmtTime(r.elapsed_time_s)}
+                                  {r.is_pr && (
+                                    <span className="pr-badge" title="Personal Record!">PR</span>
+                                  )}
+                                </td>
+                                <td className="muted" style={{ fontSize: 12 }}>
+                                  {fmtVam(ranking.segment.elevation_gain_m, r.elapsed_time_s)}
+                                  {ranking.segment.elevation_gain_m ? <span style={{ fontSize: 10 }}> m/h</span> : ''}
+                                </td>
                                 <td style={{ fontWeight: 700, color: r.points > 0 ? 'var(--orange)' : 'var(--muted)' }}>
                                   {r.points}
                                 </td>

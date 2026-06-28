@@ -16,10 +16,13 @@ const yearAgo = () => {
   return d.toISOString().slice(0, 10);
 };
 
-// GET /api/segments/qualifying
+// GET /api/segments/qualifying?from=&to=&minRiders=
 router.get('/segments/qualifying', (req, res, next) => {
   try {
-    res.json(getQualifyingSegments());
+    const from = req.query.from || null;
+    const to = req.query.to || null;
+    const minRiders = parseInt(req.query.minRiders) || 1;
+    res.json(getQualifyingSegments(from, to, minRiders));
   } catch (err) { next(err); }
 });
 
