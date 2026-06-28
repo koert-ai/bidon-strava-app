@@ -7,6 +7,7 @@ import PointsConfig from './pages/PointsConfig.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Leaderboard from './pages/Leaderboard.jsx';
 import RiderProfile from './pages/RiderProfile.jsx';
+import Riders from './pages/Riders.jsx';
 import BidonWeek from './pages/BidonWeek.jsx';
 import Goals from './pages/Goals.jsx';
 
@@ -43,7 +44,8 @@ export default function App() {
           <NavLink to="/dashboard">Dashboard</NavLink>
           <NavLink to="/bidon-week">Bidon Week</NavLink>
           <NavLink to="/goals">Goals</NavLink>
-          <NavLink to="/connect">Riders</NavLink>
+          <NavLink to="/riders">Riders</NavLink>
+          <NavLink to="/connect">Connect</NavLink>
           <NavLink to="/config/climbs">Climb Config</NavLink>
           <NavLink to="/config/points">Points Config</NavLink>
         </div>
@@ -66,6 +68,7 @@ export default function App() {
         <Route path="/connect" element={<Connect />} />
         <Route path="/config/climbs" element={<ClimbConfig />} />
         <Route path="/config/points" element={<PointsConfig />} />
+        <Route path="/riders" element={<Riders />} />
         <Route path="/riders/:riderId" element={<RiderProfile />} />
         <Route path="/bidon-week" element={<BidonWeek />} />
         <Route path="/goals" element={<Goals />} />

@@ -9,6 +9,7 @@ const webhookRouter = require('./routes/webhook');
 const eventsRouter = require('./routes/events');
 const goalsRouter = require('./routes/goals');
 const notificationsRouter = require('./routes/notifications');
+const ridersRouter = require('./routes/riders');
 const { startDigestJob } = require('./jobs/emailDigest');
 
 dotenv.config({ path: path.resolve(__dirname, '.env') });
@@ -22,6 +23,7 @@ app.use('/api/webhook', webhookRouter);
 app.use('/api/events', eventsRouter);
 app.use('/api/goals', goalsRouter);
 app.use('/api/notifications', notificationsRouter);
+app.use('/api/riders', ridersRouter);
 app.use('/api', climbsRouter);
 
 startDigestJob();

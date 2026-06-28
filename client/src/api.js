@@ -66,6 +66,10 @@ export const getMonthlyPoints = (from, to, minRiders = 1, starredOnly = false) =
 export const getRecentFeed = (limit = 20) => req(`/feed/recent?limit=${limit}`);
 export const getGlobalStats = () => req('/stats/global');
 
+// Riders management
+export const getAllRiders = () => req('/riders').then(r => r.data);
+export const updateRider = (id, data) => req(`/riders/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.data);
+
 // Rider profile
 export const getRiderProfile = (riderId) => req(`/riders/${riderId}/profile`);
 

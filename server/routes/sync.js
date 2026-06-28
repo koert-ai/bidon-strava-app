@@ -17,6 +17,9 @@ const router = express.Router();
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// In-memory set of rider IDs currently being synced — prevents duplicate parallel syncs
+const activeSyncs = new Set();
+
 const CYCLING_TYPES = new Set(['ride', 'virtualride', 'ebikeride', 'handcycle', 'velomobile']);
 
 const normalizeType = (activity) => {
@@ -149,38 +152,74 @@ const runSync = async ({ riderId, afterTs, beforeTs, eventScoped = false }) => {
   return { totalActivities, totalEfforts };
 };
 
-// POST /api/sync/backfill/:riderId — full historical backfill
-router.post('/backfill/:riderId', async (req, res, next) => {
+// POST /api/sync/backfill/:riderId — full historical backfill (runs in background)
+router.post('/backfill/:riderId', (req, res, next) => {
   try {
     const riderId = Number(req.params.riderId);
     const rider = getRiderById(riderId);
     if (!rider) return res.status(404).json({ error: 'Rider not found' });
+
+    if (activeSyncs.has(riderId)) {
+      return res.status(409).json({ error: 'Sync already in progress for this rider' });
+    }
 
     const syncState = getSyncState(riderId) || { backfill_complete: 0, last_page_fetched: 0 };
     if (syncState.backfill_complete) {
       return res.json({ message: 'Backfill already complete', syncState });
     }
 
-    const { totalActivities, totalEfforts } = await runSync({ riderId });
+    // Respond immediately — sync runs in background so Railway doesn't time out
+    res.json({ message: 'Backfill started', riderId });
 
+    activeSyncs.add(riderId);
+    // Clear any previous error when starting fresh
     upsertSyncState({
       riderId,
-      backfillComplete: 1,
-      lastPageFetched: getSyncState(riderId)?.last_page_fetched || 0,
-      oldestActivityDate: getOldestActivityDate(riderId),
-      lastSyncedAt: Math.floor(Date.now() / 1000),
+      backfillComplete: 0,
+      lastPageFetched: syncState.last_page_fetched || 0,
+      oldestActivityDate: syncState.oldest_activity_date || null,
+      lastSyncedAt: syncState.last_synced_at || null,
+      lastError: null,
     });
 
-    res.json({ message: 'Backfill complete', totalActivities, totalEfforts, syncState: getSyncState(riderId) });
+    runSync({ riderId })
+      .then(() => {
+        upsertSyncState({
+          riderId,
+          backfillComplete: 1,
+          lastPageFetched: getSyncState(riderId)?.last_page_fetched || 0,
+          oldestActivityDate: getOldestActivityDate(riderId),
+          lastSyncedAt: Math.floor(Date.now() / 1000),
+          lastError: null,
+        });
+        console.log(`[sync] Backfill complete for rider ${riderId}`);
+      })
+      .catch(err => {
+        console.error(`[sync] Backfill error for rider ${riderId}:`, err.message);
+        const current = getSyncState(riderId);
+        upsertSyncState({
+          riderId,
+          backfillComplete: 0,
+          lastPageFetched: current?.last_page_fetched || 0,
+          oldestActivityDate: current?.oldest_activity_date || null,
+          lastSyncedAt: current?.last_synced_at || null,
+          lastError: err.message,
+        });
+      })
+      .finally(() => activeSyncs.delete(riderId));
   } catch (err) { next(err); }
 });
 
-// POST /api/sync/event/:riderId — event-scoped sync (fast: only fetches the event window)
-router.post('/event/:riderId', async (req, res, next) => {
+// POST /api/sync/event/:riderId — event-scoped sync (runs in background)
+router.post('/event/:riderId', (req, res, next) => {
   try {
     const riderId = Number(req.params.riderId);
     const rider = getRiderById(riderId);
     if (!rider) return res.status(404).json({ error: 'Rider not found' });
+
+    if (activeSyncs.has(riderId)) {
+      return res.status(409).json({ error: 'Sync already in progress for this rider' });
+    }
 
     const { eventId } = req.body;
     if (!eventId) return res.status(400).json({ error: 'eventId required' });
@@ -188,13 +227,50 @@ router.post('/event/:riderId', async (req, res, next) => {
     const event = getEventById(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    // Convert event dates to Unix timestamps
+    // Respond immediately — sync runs in background
+    res.json({ message: 'Event sync started', event: event.name, riderId });
+
+    activeSyncs.add(riderId);
+    const current = getSyncState(riderId);
+    // Clear previous error
+    upsertSyncState({
+      riderId,
+      backfillComplete: current?.backfill_complete || 0,
+      lastPageFetched: current?.last_page_fetched || 0,
+      oldestActivityDate: current?.oldest_activity_date || null,
+      lastSyncedAt: current?.last_synced_at || null,
+      lastError: null,
+    });
+
     const afterTs = Math.floor(new Date(event.date_from + 'T00:00:00Z').getTime() / 1000);
     const beforeTs = Math.floor(new Date(event.date_to + 'T23:59:59Z').getTime() / 1000);
 
-    const { totalActivities, totalEfforts } = await runSync({ riderId, afterTs, beforeTs, eventScoped: true });
-
-    res.json({ message: 'Event sync complete', event: event.name, totalActivities, totalEfforts });
+    runSync({ riderId, afterTs, beforeTs, eventScoped: true })
+      .then(({ totalActivities, totalEfforts }) => {
+        const after = getSyncState(riderId);
+        upsertSyncState({
+          riderId,
+          backfillComplete: after?.backfill_complete || 0,
+          lastPageFetched: after?.last_page_fetched || 0,
+          oldestActivityDate: after?.oldest_activity_date || null,
+          lastSyncedAt: Math.floor(Date.now() / 1000),
+          lastError: null,
+        });
+        console.log(`[sync] Event sync complete for rider ${riderId}: ${totalActivities} activities, ${totalEfforts} efforts`);
+      })
+      .catch(err => {
+        console.error(`[sync] Event sync error for rider ${riderId}:`, err.message);
+        const after = getSyncState(riderId);
+        upsertSyncState({
+          riderId,
+          backfillComplete: after?.backfill_complete || 0,
+          lastPageFetched: after?.last_page_fetched || 0,
+          oldestActivityDate: after?.oldest_activity_date || null,
+          lastSyncedAt: after?.last_synced_at || null,
+          lastError: err.message,
+        });
+      })
+      .finally(() => activeSyncs.delete(riderId));
   } catch (err) { next(err); }
 });
 
@@ -223,7 +299,7 @@ router.get('/status/all', (req, res, next) => {
       const syncState = getSyncState(r.id) || { backfill_complete: 0, last_page_fetched: 0 };
       return {
         rider: r,
-        sync_state: syncState,
+        sync_state: { ...syncState, is_syncing: activeSyncs.has(r.id) },
         activity_count: countActivities(r.id),
         segment_effort_count: countSegmentEfforts(r.id),
       };

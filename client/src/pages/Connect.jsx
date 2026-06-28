@@ -187,22 +187,30 @@ export default function Connect() {
                 const lastSynced = sync_state.last_synced_at
                   ? new Date(sync_state.last_synced_at * 1000).toLocaleString()
                   : null;
-                const isBusy = backfilling !== null || clearing !== null;
+                const isBusy = sync_state.is_syncing || backfilling !== null || clearing !== null;
                 return (
                 <tr key={rider.id}>
                   <td style={{ fontWeight: 600 }}>{rider.name}</td>
                   <td>{activity_count.toLocaleString()}</td>
                   <td>{segment_effort_count.toLocaleString()}</td>
                   <td>
-                    {sync_state.backfill_complete ? (
+                    {sync_state.is_syncing ? (
+                      <span className="muted">
+                        ⏳ Syncing… (page {sync_state.last_page_fetched})
+                      </span>
+                    ) : sync_state.last_error ? (
+                      <span style={{ color: 'var(--it-red)' }} title={sync_state.last_error}>
+                        ✗ Error · {sync_state.last_error.length > 50
+                          ? sync_state.last_error.slice(0, 50) + '…'
+                          : sync_state.last_error}
+                      </span>
+                    ) : sync_state.backfill_complete ? (
                       <span style={{ color: 'var(--it-green)', fontWeight: 700 }}>
                         ✓ Synced{lastSynced ? ` · ${lastSynced}` : ''}
                       </span>
-                    ) : backfilling === rider.id ? (
-                      <span className="muted">Syncing (page {sync_state.last_page_fetched})…</span>
                     ) : activity_count > 0 ? (
                       <span className="muted">
-                        Partial · last page {sync_state.last_page_fetched}
+                        Partial · page {sync_state.last_page_fetched}
                         {lastSynced ? ` · ${lastSynced}` : ''}
                       </span>
                     ) : (
@@ -210,13 +218,16 @@ export default function Connect() {
                     )}
                   </td>
                   <td style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                    {(!sync_state.backfill_complete || selectedEvent) && (
+                    {(!sync_state.backfill_complete || selectedEvent || sync_state.last_error) && (
                       <button
                         className="btn-primary btn-small"
                         onClick={() => handleBackfill(rider.id)}
                         disabled={isBusy}
                       >
-                        {backfilling === rider.id ? 'Syncing…' : selectedEvent ? 'Sync event' : 'Start sync'}
+                        {sync_state.is_syncing ? 'Syncing…'
+                          : sync_state.last_error ? 'Retry sync'
+                          : selectedEvent ? 'Sync event'
+                          : 'Start sync'}
                       </button>
                     )}
                     {activity_count > 0 && (

@@ -101,6 +101,12 @@ const migrateSchema = () => {
     db.exec('ALTER TABLE segments ADD COLUMN elevation_low REAL');
   }
 
+  // Sync error tracking
+  const syncCols = db.prepare('PRAGMA table_info(sync_state)').all().map(c => c.name);
+  if (!syncCols.includes('last_error')) {
+    db.exec('ALTER TABLE sync_state ADD COLUMN last_error TEXT');
+  }
+
   // Bidon Week event media fields
   const eventCols = db.prepare('PRAGMA table_info(events)').all().map(c => c.name);
   if (!eventCols.includes('video_url')) {
@@ -108,6 +114,60 @@ const migrateSchema = () => {
   }
   if (!eventCols.includes('notes')) {
     db.exec('ALTER TABLE events ADD COLUMN notes TEXT');
+  }
+
+  // Rider profile fields
+  const riderCols = db.prepare('PRAGMA table_info(riders)').all().map(c => c.name);
+  if (!riderCols.includes('nickname')) {
+    db.exec('ALTER TABLE riders ADD COLUMN nickname TEXT');
+  }
+  if (!riderCols.includes('picture_url')) {
+    db.exec('ALTER TABLE riders ADD COLUMN picture_url TEXT');
+  }
+  if (!riderCols.includes('palmares')) {
+    db.exec('ALTER TABLE riders ADD COLUMN palmares TEXT'); // JSON array of strings
+  }
+  if (!riderCols.includes('favorite_cyclists')) {
+    db.exec('ALTER TABLE riders ADD COLUMN favorite_cyclists TEXT'); // JSON array of strings
+  }
+  if (!riderCols.includes('bio')) {
+    db.exec('ALTER TABLE riders ADD COLUMN bio TEXT');
+  }
+
+  // Seed the 9 Bidon club riders (without Strava connection — they connect later)
+  const riderSeedCount = db.prepare("SELECT COUNT(*) as count FROM riders").get().count;
+  if (riderSeedCount === 0) {
+    const insRider = db.prepare('INSERT OR IGNORE INTO riders (name) VALUES (?)');
+    db.transaction(() => {
+      ['Ares', 'Koert', 'Gregor', 'Jaap', 'Rutger', 'Berg', 'Thomas', 'Chris', 'Maurice'].forEach(n => insRider.run(n));
+    })();
+  }
+
+  // Seed historical Bidon Week events
+  const eventCount = db.prepare("SELECT COUNT(*) as count FROM events").get().count;
+  if (eventCount === 0) {
+    const insEvent = db.prepare(
+      'INSERT INTO events (name, location, date_from, date_to) VALUES (?, ?, ?, ?)'
+    );
+    const bidonEvents = [
+      { name: 'Bidon Week 2001', location: 'Mai Tai', year: 2001 },
+      { name: 'Bidon Week 2002', location: 'Mont Ventoux', year: 2002 },
+      { name: 'Bidon Week 2003', location: 'Pyreneeën', year: 2003 },
+      { name: 'Bidon Week 2004', location: 'Alpen', year: 2004 },
+      { name: 'Bidon Week 2006', location: 'Barcelonette', year: 2006 },
+      { name: 'Bidon Week 2008', location: 'Marmotte', year: 2008 },
+      { name: 'Bidon Week 2009', location: 'Lombardije', year: 2009 },
+      { name: 'Bidon Week 2010', location: 'Vogezen', year: 2010 },
+      { name: 'Bidon Week 2011', location: 'Mallorca', year: 2011 },
+      { name: 'Bidon Week 2013', location: 'Tegernsee', year: 2013 },
+      { name: 'Bidon Week 2014', location: 'Sierra Nevada', year: 2014 },
+      { name: 'Bidon Week 2015', location: 'Cevennen', year: 2015 },
+    ];
+    db.transaction(() => {
+      bidonEvents.forEach(({ name, location, year }) => {
+        insEvent.run(name, location, `${year}-09-01`, `${year}-09-30`);
+      });
+    })();
   }
 
   // Create category_config (replaces climb_config)
@@ -255,9 +315,18 @@ const replacePointsForCategory = (category, pointsArray) => {
 
 // ── Riders ─────────────────────────────────────────────────────────────────────
 
+const getAllRiders = () =>
+  db.prepare('SELECT id, name, nickname, picture_url, palmares, favorite_cyclists, bio, strava_athlete_id, connected_at FROM riders ORDER BY id').all();
+
 const getRiderById = (id) => db.prepare('SELECT * FROM riders WHERE id = ?').get(id);
 const getRiderByStravaAthleteId = (stravaAthleteId) =>
   db.prepare('SELECT * FROM riders WHERE strava_athlete_id = ?').get(stravaAthleteId);
+
+const updateRiderProfile = (id, { name, nickname, picture_url, palmares, favorite_cyclists, bio }) => {
+  db.prepare(
+    `UPDATE riders SET name=?, nickname=?, picture_url=?, palmares=?, favorite_cyclists=?, bio=? WHERE id=?`
+  ).run(name, nickname ?? null, picture_url ?? null, palmares ?? null, favorite_cyclists ?? null, bio ?? null, id);
+};
 
 const upsertRider = ({ stravaAthleteId, name, accessToken, refreshToken, tokenExpiresAt, connectedAt }) => {
   const existing = getRiderByStravaAthleteId(stravaAthleteId);
@@ -279,17 +348,17 @@ const upsertRider = ({ stravaAthleteId, name, accessToken, refreshToken, tokenEx
 const getSyncState = (riderId) =>
   db.prepare('SELECT * FROM sync_state WHERE rider_id = ?').get(riderId);
 
-const upsertSyncState = ({ riderId, backfillComplete = 0, lastPageFetched = 0, oldestActivityDate = null, lastSyncedAt = null }) => {
+const upsertSyncState = ({ riderId, backfillComplete = 0, lastPageFetched = 0, oldestActivityDate = null, lastSyncedAt = null, lastError = null }) => {
   const existing = getSyncState(riderId);
   if (existing) {
     db.prepare(
-      `UPDATE sync_state SET backfill_complete=?, last_page_fetched=?, oldest_activity_date=?, last_synced_at=? WHERE rider_id=?`
-    ).run(backfillComplete, lastPageFetched, oldestActivityDate, lastSyncedAt, riderId);
+      `UPDATE sync_state SET backfill_complete=?, last_page_fetched=?, oldest_activity_date=?, last_synced_at=?, last_error=? WHERE rider_id=?`
+    ).run(backfillComplete, lastPageFetched, oldestActivityDate, lastSyncedAt, lastError, riderId);
   } else {
     db.prepare(
-      `INSERT INTO sync_state (rider_id, backfill_complete, last_page_fetched, oldest_activity_date, last_synced_at)
-       VALUES (?, ?, ?, ?, ?)`
-    ).run(riderId, backfillComplete, lastPageFetched, oldestActivityDate, lastSyncedAt);
+      `INSERT INTO sync_state (rider_id, backfill_complete, last_page_fetched, oldest_activity_date, last_synced_at, last_error)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(riderId, backfillComplete, lastPageFetched, oldestActivityDate, lastSyncedAt, lastError);
   }
 };
 
@@ -838,7 +907,9 @@ const getAllPushSubscriptions = () =>
 
 module.exports = {
   db,
+  getAllRiders,
   getRiderById,
+  updateRiderProfile,
   getRiderByStravaAthleteId,
   upsertRider,
   getSyncState,
