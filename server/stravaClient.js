@@ -21,6 +21,26 @@ const TOKEN_URL = 'https://www.strava.com/oauth/token';
 
 let lastUsage = { short: 0, shortLimit: 100, long: 0, longLimit: 10000 };
 
+// ── Simple in-memory API response cache ───────────────────────────────────────
+const apiCache = new Map(); // key → { data, expiresAt }
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+// Paths that should never be cached (always fetch fresh)
+const NEVER_CACHE = new Set(['/athlete/activities']);
+
+const getCached = (key) => {
+  const entry = apiCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) { apiCache.delete(key); return null; }
+  return entry.data;
+};
+
+const setCache = (key, data, ttlMs = CACHE_TTL_MS) => {
+  apiCache.set(key, { data, expiresAt: Date.now() + ttlMs });
+};
+
+const clearApiCache = () => apiCache.clear();
+
 const parseRateLimit = (value) => {
   if (!value) return null;
   const parts = value.split(',').map((v) => v.trim()).filter(Boolean);
@@ -135,7 +155,7 @@ const fetchWithRateLimit = async (url, options = {}) => {
   }
 };
 
-const apiCall = async ({ riderId, path, method = 'GET', queryParams = {}, body = null }) => {
+const apiCall = async ({ riderId, path, method = 'GET', queryParams = {}, body = null, useCache = true }) => {
   const accessToken = await refreshTokenIfNeeded(riderId);
   const url = new URL(`${API_BASE}${path}`);
   Object.entries(queryParams).forEach(([key, value]) => {
@@ -143,6 +163,15 @@ const apiCall = async ({ riderId, path, method = 'GET', queryParams = {}, body =
       url.searchParams.set(key, String(value));
     }
   });
+
+  // Cache GET requests that aren't in the never-cache list
+  const cacheKey = `${riderId}:${url.pathname}?${url.searchParams}`;
+  const shouldCache = method === 'GET' && useCache && !NEVER_CACHE.has(path);
+
+  if (shouldCache) {
+    const cached = getCached(cacheKey);
+    if (cached) return cached;
+  }
 
   const response = await fetchWithRateLimit(url.toString(), {
     method,
@@ -152,7 +181,10 @@ const apiCall = async ({ riderId, path, method = 'GET', queryParams = {}, body =
     },
     body: body ? JSON.stringify(body) : undefined,
   });
-  return response.json();
+  const data = await response.json();
+
+  if (shouldCache) setCache(cacheKey, data);
+  return data;
 };
 
 const getRateLimitState = () => ({ ...lastUsage });
@@ -163,4 +195,5 @@ module.exports = {
   refreshTokenIfNeeded,
   updateRateLimitFromHeaders,
   getRateLimitState,
+  clearApiCache,
 };

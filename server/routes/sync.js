@@ -10,6 +10,7 @@ const {
   countActivities,
   countSegmentEfforts,
   getOldestActivityDate,
+  getEventById,
 } = require('../db');
 
 const router = express.Router();
@@ -43,6 +44,9 @@ const mapSegment = (segment) => ({
   distance_m: segment.distance,
   elevation_gain_m: segment.elevation_gain,
   average_grade: segment.average_grade,
+  max_grade: segment.maximum_grade ?? null,
+  elevation_high: segment.elevation_high ?? null,
+  elevation_low: segment.elevation_low ?? null,
   country: segment.country,
 });
 
@@ -65,104 +69,133 @@ const safeFetchActivityEfforts = async (riderId, activityId) => {
   return response;
 };
 
+// Core function that processes a paginated batch of activities for a rider.
+// afterTs / beforeTs are optional Unix timestamps (Strava API params).
+// When eventScoped=true, we don't touch backfill_complete.
+const runSync = async ({ riderId, afterTs, beforeTs, eventScoped = false }) => {
+  let page = 1;
+  let hasMore = true;
+  let totalActivities = 0;
+  let totalEfforts = 0;
+
+  if (!eventScoped) {
+    const syncState = getSyncState(riderId) || { last_page_fetched: 0 };
+    page = syncState.last_page_fetched ? syncState.last_page_fetched + 1 : 1;
+  }
+
+  while (hasMore) {
+    const queryParams = { per_page: 100, page };
+    if (afterTs) queryParams.after = afterTs;
+    if (beforeTs) queryParams.before = beforeTs;
+
+    const activityList = await apiCall({
+      riderId,
+      path: '/athlete/activities',
+      queryParams,
+    });
+
+    const rideActivities = Array.isArray(activityList)
+      ? activityList.filter(isCyclingActivity)
+      : [];
+
+    if (activityList.length === 0) {
+      // No more pages — mark complete only for full backfill
+      if (!eventScoped) {
+        upsertSyncState({
+          riderId,
+          backfillComplete: 1,
+          lastPageFetched: page,
+          oldestActivityDate: getOldestActivityDate(riderId),
+          lastSyncedAt: Math.floor(Date.now() / 1000),
+        });
+      }
+      break;
+    }
+
+    let pageEfforts = 0;
+    for (const activity of rideActivities) {
+      insertOrUpdateActivity(mapActivity(activity, riderId));
+      totalActivities += 1;
+
+      const activityDetails = await safeFetchActivityEfforts(riderId, activity.id);
+      if (!activityDetails.segment_efforts || !Array.isArray(activityDetails.segment_efforts)) continue;
+
+      for (const effort of activityDetails.segment_efforts) {
+        if (!effort.segment || !effort.id) continue;
+        insertOrUpdateSegment(mapSegment(effort.segment));
+        insertOrUpdateSegmentEffort(mapSegmentEffort(effort, riderId));
+        pageEfforts += 1;
+        totalEfforts += 1;
+      }
+    }
+
+    upsertSyncState({
+      riderId,
+      backfillComplete: eventScoped ? (getSyncState(riderId)?.backfill_complete || 0) : 0,
+      lastPageFetched: page,
+      oldestActivityDate: getOldestActivityDate(riderId),
+      lastSyncedAt: Math.floor(Date.now() / 1000),
+    });
+
+    const rl = getRateLimitState();
+    console.log(`[sync] page ${page}: ${rideActivities.length} activities, ${pageEfforts} efforts stored, rate ${rl.short}/${rl.shortLimit}`);
+
+    if (rl.short / Math.max(rl.shortLimit, 1) >= 0.9) await sleep(5000);
+
+    page += 1;
+    hasMore = activityList.length === 100;
+  }
+
+  return { totalActivities, totalEfforts };
+};
+
+// POST /api/sync/backfill/:riderId — full historical backfill
 router.post('/backfill/:riderId', async (req, res, next) => {
   try {
     const riderId = Number(req.params.riderId);
     const rider = getRiderById(riderId);
-    if (!rider) {
-      return res.status(404).json({ error: 'Rider not found' });
-    }
+    if (!rider) return res.status(404).json({ error: 'Rider not found' });
 
     const syncState = getSyncState(riderId) || { backfill_complete: 0, last_page_fetched: 0 };
     if (syncState.backfill_complete) {
       return res.json({ message: 'Backfill already complete', syncState });
     }
 
-    let page = syncState.last_page_fetched ? syncState.last_page_fetched + 1 : 1;
-    let hasMore = true;
-    let totalActivities = 0;
-    let totalEfforts = 0;
-
-    while (hasMore) {
-      const activityList = await apiCall({
-        riderId,
-        path: '/athlete/activities',
-        queryParams: { per_page: 100, page },
-      });
-
-      const rideActivities = Array.isArray(activityList)
-        ? activityList.filter(isCyclingActivity)
-        : [];
-
-      if (activityList.length === 0 || rideActivities.length === 0) {
-        if (activityList.length === 0) {
-          upsertSyncState({
-            riderId,
-            backfillComplete: 1,
-            lastPageFetched: page,
-            oldestActivityDate: getOldestActivityDate(riderId),
-            lastSyncedAt: Math.floor(Date.now() / 1000),
-          });
-          return res.json({
-            message: 'Backfill complete',
-            page,
-            totalActivities,
-            totalEfforts,
-            syncState: getSyncState(riderId),
-          });
-        }
-      }
-
-      let pageEfforts = 0;
-      for (const activity of rideActivities) {
-        insertOrUpdateActivity(mapActivity(activity, riderId));
-        totalActivities += 1;
-
-        const activityDetails = await safeFetchActivityEfforts(riderId, activity.id);
-        if (!activityDetails.segment_efforts || !Array.isArray(activityDetails.segment_efforts)) {
-          continue;
-        }
-
-        for (const effort of activityDetails.segment_efforts) {
-          if (!effort.segment || !effort.id) continue;
-          insertOrUpdateSegment(mapSegment(effort.segment));
-          insertOrUpdateSegmentEffort(mapSegmentEffort(effort, riderId));
-          pageEfforts += 1;
-          totalEfforts += 1;
-        }
-      }
-
-      upsertSyncState({
-        riderId,
-        backfillComplete: 0,
-        lastPageFetched: page,
-        oldestActivityDate: getOldestActivityDate(riderId),
-        lastSyncedAt: Math.floor(Date.now() / 1000),
-      });
-
-      const rl = getRateLimitState();
-      console.log(`Page ${page}: ${rideActivities.length} activities, ${pageEfforts} segment efforts stored, rate limit ${rl.short}/${rl.shortLimit}`);
-
-      if (rl.short / Math.max(rl.shortLimit, 1) >= 0.9) {
-        await sleep(5000);
-      }
-
-      page += 1;
-      hasMore = activityList.length === 100;
-    }
+    const { totalActivities, totalEfforts } = await runSync({ riderId });
 
     upsertSyncState({
       riderId,
       backfillComplete: 1,
-      lastPageFetched: page - 1,
+      lastPageFetched: getSyncState(riderId)?.last_page_fetched || 0,
       oldestActivityDate: getOldestActivityDate(riderId),
       lastSyncedAt: Math.floor(Date.now() / 1000),
     });
 
     res.json({ message: 'Backfill complete', totalActivities, totalEfforts, syncState: getSyncState(riderId) });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
+});
+
+// POST /api/sync/event/:riderId — event-scoped sync (fast: only fetches the event window)
+router.post('/event/:riderId', async (req, res, next) => {
+  try {
+    const riderId = Number(req.params.riderId);
+    const rider = getRiderById(riderId);
+    if (!rider) return res.status(404).json({ error: 'Rider not found' });
+
+    const { eventId } = req.body;
+    if (!eventId) return res.status(400).json({ error: 'eventId required' });
+
+    const event = getEventById(eventId);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+
+    // Convert event dates to Unix timestamps
+    const afterTs = Math.floor(new Date(event.date_from + 'T00:00:00Z').getTime() / 1000);
+    const beforeTs = Math.floor(new Date(event.date_to + 'T23:59:59Z').getTime() / 1000);
+
+    const { totalActivities, totalEfforts } = await runSync({ riderId, afterTs, beforeTs, eventScoped: true });
+
+    res.json({ message: 'Event sync complete', event: event.name, totalActivities, totalEfforts });
+  } catch (err) { next(err); }
 });
 
 router.delete('/data/:riderId', (req, res, next) => {
@@ -223,6 +256,13 @@ router.get('/status/:riderId', (req, res, next) => {
   } catch (err) {
     next(err);
   }
+});
+
+// GET /api/sync/rate-limit — current Strava API rate limit state
+router.get('/rate-limit', (req, res, next) => {
+  try {
+    res.json(getRateLimitState());
+  } catch (err) { next(err); }
 });
 
 module.exports = router;

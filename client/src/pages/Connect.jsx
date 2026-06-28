@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { getStravaLoginUrl, getSyncStatus, triggerBackfill, clearRiderData } from '../api.js';
+import { Link } from 'react-router-dom';
+import { getStravaLoginUrl, getSyncStatus, triggerBackfill, triggerEventSync, clearRiderData, getEvents, getRateLimitState } from '../api.js';
 
 const getAllStatus = () => fetch('/api/sync/status/all').then(r => r.json());
 
@@ -9,7 +10,10 @@ export default function Connect() {
   const [backfilling, setBackfilling] = useState(null); // riderId being backfilled
   const [clearing, setClearing] = useState(null); // riderId being cleared
   const [errors, setErrors] = useState({});
+  const [events, setEvents] = useState([]);
+  const [selectedEvent, setSelectedEvent] = useState('');
   const [justConnected, setJustConnected] = useState(null); // name from URL
+  const [rateLimit, setRateLimit] = useState(null);
 
   // Read riderId / name from OAuth redirect query params
   useEffect(() => {
@@ -33,6 +37,10 @@ export default function Connect() {
   };
 
   useEffect(() => { fetchAll(); }, []);
+  useEffect(() => { getEvents().then(setEvents); }, []);
+  useEffect(() => {
+    getRateLimitState().then(setRateLimit).catch(() => {});
+  }, []);
 
   // Poll while any backfill is running
   useEffect(() => {
@@ -59,7 +67,11 @@ export default function Connect() {
     setBackfilling(riderId);
     setErrors(e => ({ ...e, [riderId]: null }));
     try {
-      await triggerBackfill(riderId);
+      if (selectedEvent) {
+        await triggerEventSync(riderId, Number(selectedEvent));
+      } else {
+        await triggerBackfill(riderId);
+      }
       await fetchAll();
     } catch (err) {
       setErrors(e => ({ ...e, [riderId]: err.message }));
@@ -71,6 +83,40 @@ export default function Connect() {
   return (
     <div className="page">
       <h1>Rider Connections</h1>
+
+      {rateLimit && (
+        <div className="card rate-limit-card" style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+            Strava API Rate Limit
+          </div>
+          <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--muted-text)' }}>15-min window</div>
+              <div className="progress-bar-wrap" style={{ width: 140, marginTop: 4 }}>
+                <div className="progress-bar" style={{
+                  width: `${Math.min(100, (rateLimit.short / rateLimit.shortLimit) * 100)}%`,
+                  background: rateLimit.short / rateLimit.shortLimit > 0.8 ? '#e74c3c' : 'var(--orange)',
+                }} />
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--muted-text)', marginTop: 2 }}>
+                {rateLimit.short} / {rateLimit.shortLimit}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--muted-text)' }}>Daily</div>
+              <div className="progress-bar-wrap" style={{ width: 140, marginTop: 4 }}>
+                <div className="progress-bar" style={{
+                  width: `${Math.min(100, (rateLimit.long / rateLimit.longLimit) * 100)}%`,
+                  background: rateLimit.long / rateLimit.longLimit > 0.8 ? '#e74c3c' : 'var(--orange)',
+                }} />
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--muted-text)', marginTop: 2 }}>
+                {rateLimit.long} / {rateLimit.longLimit}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {justConnected && (
         <div className="card" style={{ borderLeft: '4px solid var(--it-green)', marginBottom: 20 }}>
@@ -90,6 +136,32 @@ export default function Connect() {
         <a className="strava-btn" href={getStravaLoginUrl()}>
           Connect with Strava
         </a>
+      </div>
+
+      {/* Event picker — scopes sync to a specific event date range */}
+      <div className="card" style={{ marginBottom: 20 }}>
+        <h2>Sync scope</h2>
+        <p className="muted mb" style={{ fontSize: 13 }}>
+          Select an event to sync only that date window (fast). Leave blank for a full all-time backfill (slow).
+          Manage events on the <Link to="/bidon-week">Bidon Week</Link> page.
+        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <select
+            value={selectedEvent}
+            onChange={e => setSelectedEvent(e.target.value)}
+            style={{ minWidth: 200 }}
+          >
+            <option value="">Full backfill (all time)</option>
+            {events.map(ev => (
+              <option key={ev.id} value={ev.id}>
+                {ev.name}{ev.location ? ` — ${ev.location}` : ''} ({ev.date_from} → {ev.date_to})
+              </option>
+            ))}
+          </select>
+          {events.length === 0 && (
+            <span className="muted" style={{ fontSize: 12 }}>No events defined yet.</span>
+          )}
+        </div>
       </div>
 
       {loading && <p className="muted">Loading…</p>}
@@ -138,13 +210,13 @@ export default function Connect() {
                     )}
                   </td>
                   <td style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                    {!sync_state.backfill_complete && (
+                    {(!sync_state.backfill_complete || selectedEvent) && (
                       <button
                         className="btn-primary btn-small"
                         onClick={() => handleBackfill(rider.id)}
                         disabled={isBusy}
                       >
-                        {backfilling === rider.id ? 'Syncing…' : 'Start sync'}
+                        {backfilling === rider.id ? 'Syncing…' : selectedEvent ? 'Sync event' : 'Start sync'}
                       </button>
                     )}
                     {activity_count > 0 && (

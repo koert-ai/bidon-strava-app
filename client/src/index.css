@@ -470,7 +470,67 @@ label {
   grid-template-columns: 1fr 1fr;
 }
 
+/* ── Date presets ─────────────────────────────────────────────────────────── */
+
+.date-presets {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.preset-btn {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--black);
+  border-radius: 4px;
+  padding: 4px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .12s, border-color .12s;
+}
+.preset-btn:hover { border-color: var(--black); background: var(--border); }
+.preset-btn-active { background: var(--black); color: #fff; border-color: var(--black); }
+
+html.dark .preset-btn { background: #222; border-color: #444; color: var(--black); }
+html.dark .preset-btn:hover { background: #333; }
+html.dark .preset-btn-active { background: var(--orange); border-color: var(--orange); color: #fff; }
+
+/* ── Rider links ──────────────────────────────────────────────────────────── */
+
+.rider-link:hover { text-decoration: underline; color: var(--orange) !important; }
+
+/* ── Feed card header ─────────────────────────────────────────────────────── */
+
+.feed-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
 /* ── Mobile responsive ───────────────────────────────────────────────────── */
+
+/* Hamburger — hidden on desktop */
+.nav-hamburger {
+  display: none;
+  background: none;
+  border: 1px solid rgba(255,255,255,.3);
+  color: #fff;
+  padding: 5px 10px;
+  font-size: 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-left: auto;
+  order: 99;
+}
+.nav-hamburger:hover { background: rgba(255,255,255,.1); opacity: 1; }
+
+.nav-links {
+  display: contents; /* transparent in flow on desktop */
+}
 
 @media (max-width: 900px) {
   .dashboard-grid[data-split="true"] {
@@ -478,20 +538,102 @@ label {
   }
 }
 
-@media (max-width: 640px) {
+/* ── Detail tabs (Dashboard segment panel) ───────────────────────────────── */
+
+.detail-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: 12px;
+}
+
+.detail-tab {
+  background: none;
+  border: none;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--mid);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color .12s, border-color .12s;
+}
+.detail-tab:hover { color: var(--black); }
+.detail-tab.active { color: var(--orange); border-bottom-color: var(--orange); }
+
+/* ── Badges ───────────────────────────────────────────────────────────────── */
+
+.badge-card {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: default;
+}
+html.dark .badge-card { background: #222; }
+
+/* ── Goals ────────────────────────────────────────────────────────────────── */
+
+.goal-card {
+  margin-bottom: 12px;
+}
+.goal-achieved {
+  opacity: 0.7;
+  border-left: 4px solid var(--it-green);
+}
+.goal-overdue {
+  border-left: 4px solid var(--red, #ce2b37);
+}
+
+/* ── Rate limit card ──────────────────────────────────────────────────────── */
+
+.rate-limit-card { background: var(--card); }
+
+/* ── Muted text variable (used in ElevationProfile / badges) ─────────────── */
+:root { --muted-text: #888; }
+html.dark { --muted-text: #666; }
+
+@media (max-width: 720px) {
+  /* Nav becomes a vertical drawer */
   nav {
     height: auto;
     flex-wrap: wrap;
-    padding: 10px 12px;
-    gap: 6px;
+    padding: 10px 14px;
+    gap: 0;
+    align-items: center;
   }
 
   .nav-logo { height: 36px; }
   .nav-divider { display: none; }
+  .nav-hamburger { display: block; }
 
-  nav a {
-    font-size: 12px;
-    padding: 5px 8px;
+  .nav-links {
+    display: none;
+    width: 100%;
+    flex-direction: column;
+    padding: 8px 0 4px;
+    gap: 2px;
+    order: 100;
+  }
+  .nav-links.nav-links-open {
+    display: flex;
+  }
+
+  .nav-links a {
+    font-size: 13px;
+    padding: 8px 10px;
+    border-radius: 4px;
+    width: 100%;
+  }
+
+  /* Push dark toggle so it doesn't push nav links off */
+  nav > div[style] {
+    order: 98;
+    margin-left: auto;
   }
 
   .page { padding: 16px 12px; }
@@ -501,8 +643,29 @@ label {
     padding: 12px;
   }
 
-  .stat-row { flex-direction: column; }
+  /* Stack filter groups */
+  .filter-group { flex: 1 1 140px; }
 
-  table { font-size: 12px; }
+  .stat-row { gap: 10px; }
+  .stat { min-width: 0; flex: 1 1 100px; }
+
+  /* Scrollable tables on small screens */
+  .card { overflow-x: auto; }
+
+  table { font-size: 12px; min-width: 400px; }
   th, td { padding: 7px 6px; }
+
+  /* Hide less important columns on Dashboard table */
+  .dashboard-grid table th:nth-child(4),
+  .dashboard-grid table td:nth-child(4),
+  .dashboard-grid table th:nth-child(7),
+  .dashboard-grid table td:nth-child(7) {
+    display: none;
+  }
+
+  /* Hide trend column on leaderboard mobile */
+  .card table th:last-child,
+  .card table td:last-child {
+    display: none;
+  }
 }

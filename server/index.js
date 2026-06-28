@@ -5,6 +5,11 @@ const authRouter = require('./routes/auth');
 const syncRouter = require('./routes/sync');
 const configRouter = require('./routes/config');
 const climbsRouter = require('./routes/climbs');
+const webhookRouter = require('./routes/webhook');
+const eventsRouter = require('./routes/events');
+const goalsRouter = require('./routes/goals');
+const notificationsRouter = require('./routes/notifications');
+const { startDigestJob } = require('./jobs/emailDigest');
 
 dotenv.config({ path: path.resolve(__dirname, '.env') });
 
@@ -13,7 +18,13 @@ app.use(express.json());
 app.use('/api/auth', authRouter);
 app.use('/api/sync', syncRouter);
 app.use('/api/config', configRouter);
+app.use('/api/webhook', webhookRouter);
+app.use('/api/events', eventsRouter);
+app.use('/api/goals', goalsRouter);
+app.use('/api/notifications', notificationsRouter);
 app.use('/api', climbsRouter);
+
+startDigestJob();
 
 // Serve built React frontend in production
 if (process.env.NODE_ENV === 'production') {

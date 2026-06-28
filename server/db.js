@@ -9,10 +9,20 @@ const dbPath = path.resolve(__dirname, process.env.DB_PATH || './data/bidon.sqli
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
 const db = new Database(dbPath);
+console.log(`[db] SQLite database at: ${dbPath}`);
 
 const createTables = () => {
   db.exec(`
     PRAGMA foreign_keys = ON;
+
+    CREATE TABLE IF NOT EXISTS events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      location TEXT,
+      date_from TEXT NOT NULL,
+      date_to TEXT NOT NULL,
+      created_at INTEGER DEFAULT (strftime('%s','now'))
+    );
 
     CREATE TABLE IF NOT EXISTS riders (
       id INTEGER PRIMARY KEY,
@@ -80,6 +90,25 @@ const migrateSchema = () => {
   if (!segmentCols.includes('starred')) {
     db.exec('ALTER TABLE segments ADD COLUMN starred INTEGER DEFAULT 0');
   }
+  // Elevation & grade detail columns
+  if (!segmentCols.includes('max_grade')) {
+    db.exec('ALTER TABLE segments ADD COLUMN max_grade REAL');
+  }
+  if (!segmentCols.includes('elevation_high')) {
+    db.exec('ALTER TABLE segments ADD COLUMN elevation_high REAL');
+  }
+  if (!segmentCols.includes('elevation_low')) {
+    db.exec('ALTER TABLE segments ADD COLUMN elevation_low REAL');
+  }
+
+  // Bidon Week event media fields
+  const eventCols = db.prepare('PRAGMA table_info(events)').all().map(c => c.name);
+  if (!eventCols.includes('video_url')) {
+    db.exec('ALTER TABLE events ADD COLUMN video_url TEXT');
+  }
+  if (!eventCols.includes('notes')) {
+    db.exec('ALTER TABLE events ADD COLUMN notes TEXT');
+  }
 
   // Create category_config (replaces climb_config)
   db.exec(`
@@ -102,6 +131,32 @@ const migrateSchema = () => {
   }
 
   if (needsRecompute) _needsRecomputeOnInit = true;
+
+  // Goals table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS goals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      rider_id INTEGER NOT NULL REFERENCES riders(id),
+      segment_id INTEGER NOT NULL REFERENCES segments(id),
+      target_time_s INTEGER NOT NULL,
+      deadline TEXT,
+      notes TEXT,
+      created_at INTEGER DEFAULT (strftime('%s','now')),
+      achieved_at INTEGER
+    )
+  `);
+
+  // Push notification subscriptions
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      rider_id INTEGER REFERENCES riders(id),
+      endpoint TEXT UNIQUE NOT NULL,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      created_at INTEGER DEFAULT (strftime('%s','now'))
+    )
+  `);
 
   // Migrate points_config to (category, rank, points) schema if needed
   const pointsCols = db.prepare('PRAGMA table_info(points_config)').all().map(c => c.name);
@@ -266,15 +321,23 @@ const insertOrUpdateSegment = (segment) => {
   if (existing) {
     db.prepare(
       `UPDATE segments SET name=?, distance_m=?, elevation_gain_m=?, average_grade=?, country=?,
-       difficulty_score=?, category=? WHERE id=?`
+       difficulty_score=?, category=?,
+       max_grade=COALESCE(?, max_grade),
+       elevation_high=COALESCE(?, elevation_high),
+       elevation_low=COALESCE(?, elevation_low)
+       WHERE id=?`
     ).run(segment.name, segment.distance_m, segment.elevation_gain_m, segment.average_grade,
-      segment.country, score, category, segment.id);
+      segment.country, score, category,
+      segment.max_grade ?? null, segment.elevation_high ?? null, segment.elevation_low ?? null,
+      segment.id);
   } else {
     db.prepare(
-      `INSERT INTO segments (id, name, distance_m, elevation_gain_m, average_grade, country, difficulty_score, category)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO segments (id, name, distance_m, elevation_gain_m, average_grade, country,
+       difficulty_score, category, max_grade, elevation_high, elevation_low)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(segment.id, segment.name, segment.distance_m, segment.elevation_gain_m,
-      segment.average_grade, segment.country, score, category);
+      segment.average_grade, segment.country, score, category,
+      segment.max_grade ?? null, segment.elevation_high ?? null, segment.elevation_low ?? null);
   }
 };
 
@@ -483,6 +546,296 @@ const countSegmentEfforts = (riderId) =>
 const getOldestActivityDate = (riderId) =>
   db.prepare('SELECT MIN(start_date) AS oldest FROM activities WHERE rider_id = ?').get(riderId).oldest;
 
+// ── Events (Bidon Week) ────────────────────────────────────────────────────────
+
+const getEvents = () =>
+  db.prepare('SELECT * FROM events ORDER BY date_from DESC').all();
+
+const getEventById = (id) =>
+  db.prepare('SELECT * FROM events WHERE id = ?').get(id);
+
+const createEvent = ({ name, location, dateFrom, dateTo, videoUrl, notes }) =>
+  db.prepare(
+    'INSERT INTO events (name, location, date_from, date_to, video_url, notes) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(name, location || null, dateFrom, dateTo, videoUrl || null, notes || null).lastInsertRowid;
+
+const updateEvent = (id, { name, location, dateFrom, dateTo, videoUrl, notes }) =>
+  db.prepare(
+    'UPDATE events SET name=?, location=?, date_from=?, date_to=?, video_url=?, notes=? WHERE id=?'
+  ).run(name, location || null, dateFrom, dateTo, videoUrl || null, notes || null, id).changes;
+
+const deleteEvent = (id) =>
+  db.prepare('DELETE FROM events WHERE id = ?').run(id).changes;
+
+// ── Global stats ───────────────────────────────────────────────────────────────
+
+const getGlobalStats = () => ({
+  riders:     db.prepare('SELECT COUNT(*) AS c FROM riders').get().c,
+  activities: db.prepare('SELECT COUNT(*) AS c FROM activities').get().c,
+  efforts:    db.prepare('SELECT COUNT(*) AS c FROM segment_efforts').get().c,
+  segments:   db.prepare('SELECT COUNT(*) AS c FROM segments').get().c,
+});
+
+// ── Recent feed ────────────────────────────────────────────────────────────────
+
+const getRecentFeed = (limit = 20) => {
+  const events = db.prepare(`
+    SELECT se.segment_id, date(se.start_date) AS ride_date, COUNT(DISTINCT se.rider_id) AS rider_count
+    FROM segment_efforts se
+    GROUP BY se.segment_id, date(se.start_date)
+    ORDER BY ride_date DESC
+    LIMIT ?
+  `).all(limit);
+
+  return events.map(ev => {
+    const segment = getSegmentById(ev.segment_id);
+    const riders = db.prepare(`
+      SELECT se.rider_id, r.name, MIN(se.elapsed_time_s) AS best_time
+      FROM segment_efforts se
+      JOIN riders r ON r.id = se.rider_id
+      WHERE se.segment_id = ? AND date(se.start_date) = ?
+      GROUP BY se.rider_id
+      ORDER BY best_time
+    `).all(ev.segment_id, ev.ride_date);
+    return { segment, ride_date: ev.ride_date, rider_count: ev.rider_count, riders };
+  });
+};
+
+// ── Monthly points breakdown ───────────────────────────────────────────────────
+
+const getMonthlyPoints = (from, to, minRiders = 1, starredOnly = false) =>
+  db.prepare(`
+    WITH scoring_events AS (
+      SELECT se.segment_id, date(se.start_date) AS ride_date, strftime('%Y-%m', se.start_date) AS month
+      FROM segment_efforts se
+      JOIN segments s ON s.id = se.segment_id
+      WHERE s.category IS NOT NULL
+        ${starredOnly ? 'AND s.starred = 1' : ''}
+        AND date(se.start_date) BETWEEN ? AND ?
+      GROUP BY se.segment_id, date(se.start_date)
+      HAVING COUNT(DISTINCT se.rider_id) >= ?
+    ),
+    best_efforts AS (
+      SELECT se.rider_id, se.segment_id, ev.ride_date, ev.month,
+             MIN(se.elapsed_time_s) AS best_time
+      FROM segment_efforts se
+      JOIN scoring_events ev ON ev.segment_id = se.segment_id AND date(se.start_date) = ev.ride_date
+      GROUP BY se.rider_id, se.segment_id, ev.ride_date
+    ),
+    ranked AS (
+      SELECT be.rider_id, be.month, s.category,
+             ROW_NUMBER() OVER (PARTITION BY be.segment_id, be.ride_date ORDER BY be.best_time) AS rank_pos
+      FROM best_efforts be
+      JOIN segments s ON s.id = be.segment_id
+    ),
+    scored AS (
+      SELECT r.rider_id, r.month, COALESCE(pc.points, 0) AS points
+      FROM ranked r
+      LEFT JOIN points_config pc ON pc.category = r.category AND pc.rank = r.rank_pos
+    )
+    SELECT s.rider_id, ri.name, s.month, SUM(s.points) AS monthly_points
+    FROM scored s
+    JOIN riders ri ON ri.id = s.rider_id
+    GROUP BY s.rider_id, s.month
+    ORDER BY s.month, ri.name
+  `).all(from, to, minRiders);
+
+// ── Rider profile ──────────────────────────────────────────────────────────────
+
+const getRiderProfile = (riderId) => {
+  const rider = getRiderById(riderId);
+  if (!rider) return null;
+  const { access_token, refresh_token, ...safeRider } = rider;
+
+  const uniqueSegments = db.prepare(
+    'SELECT COUNT(DISTINCT segment_id) AS c FROM segment_efforts WHERE rider_id = ?'
+  ).get(riderId).c;
+
+  const topSegments = db.prepare(`
+    SELECT s.id, s.name, s.category, s.difficulty_score,
+           COUNT(se.id) AS effort_count, MIN(se.elapsed_time_s) AS best_time
+    FROM segment_efforts se JOIN segments s ON s.id = se.segment_id
+    WHERE se.rider_id = ?
+    GROUP BY se.segment_id
+    ORDER BY effort_count DESC LIMIT 10
+  `).all(riderId);
+
+  const recentRides = db.prepare(`
+    SELECT se.segment_id, s.name AS segment_name, s.category,
+           date(se.start_date) AS ride_date,
+           MIN(se.elapsed_time_s) AS best_time,
+           (SELECT COUNT(DISTINCT rider_id) FROM segment_efforts
+            WHERE segment_id = se.segment_id AND date(start_date) = date(se.start_date)) AS total_riders
+    FROM segment_efforts se
+    JOIN segments s ON s.id = se.segment_id
+    WHERE se.rider_id = ?
+    GROUP BY se.segment_id, date(se.start_date)
+    ORDER BY ride_date DESC LIMIT 20
+  `).all(riderId);
+
+  return {
+    rider: safeRider,
+    sync_state: getSyncState(riderId),
+    stats: {
+      activity_count: countActivities(riderId),
+      effort_count: countSegmentEfforts(riderId),
+      unique_segments: uniqueSegments,
+    },
+    top_segments: topSegments,
+    recent_rides: recentRides,
+  };
+};
+
+// ── Segment badges ─────────────────────────────────────────────────────────────
+// KOM, Iron Rider, First Ascent, Speed Demon — all derived from existing data
+
+const getSegmentBadges = (segmentId) => {
+  // KOM: fastest all-time effort
+  const kom = db.prepare(`
+    SELECT se.rider_id, r.name, MIN(se.elapsed_time_s) AS best_time
+    FROM segment_efforts se JOIN riders r ON r.id = se.rider_id
+    WHERE se.segment_id = ?
+    GROUP BY se.rider_id
+    ORDER BY best_time LIMIT 1
+  `).get(segmentId);
+
+  // Iron Rider: most efforts
+  const iron = db.prepare(`
+    SELECT se.rider_id, r.name, COUNT(se.id) AS effort_count
+    FROM segment_efforts se JOIN riders r ON r.id = se.rider_id
+    WHERE se.segment_id = ?
+    GROUP BY se.rider_id
+    ORDER BY effort_count DESC LIMIT 1
+  `).get(segmentId);
+
+  // First Ascent: earliest date
+  const first = db.prepare(`
+    SELECT se.rider_id, r.name, MIN(date(se.start_date)) AS first_date
+    FROM segment_efforts se JOIN riders r ON r.id = se.rider_id
+    WHERE se.segment_id = ?
+    GROUP BY se.rider_id
+    ORDER BY first_date LIMIT 1
+  `).get(segmentId);
+
+  // Speed Demon: biggest improvement (first effort vs. best effort, min 2 efforts)
+  const improvements = db.prepare(`
+    WITH first_efforts AS (
+      SELECT rider_id, MIN(elapsed_time_s) AS first_time,
+             (SELECT elapsed_time_s FROM segment_efforts se2
+              WHERE se2.segment_id = ? AND se2.rider_id = se.rider_id
+              ORDER BY start_date LIMIT 1) AS chronological_first
+      FROM segment_efforts se
+      WHERE se.segment_id = ?
+      GROUP BY rider_id
+      HAVING COUNT(*) >= 2
+    )
+    SELECT fe.rider_id, r.name,
+           (fe.chronological_first - fe.first_time) AS improvement_s,
+           fe.chronological_first AS from_time,
+           fe.first_time AS to_time
+    FROM first_efforts fe JOIN riders r ON r.id = fe.rider_id
+    WHERE fe.chronological_first > fe.first_time
+    ORDER BY improvement_s DESC LIMIT 1
+  `).get(segmentId, segmentId);
+
+  return { kom, iron, first, speed_demon: improvements };
+};
+
+// ── Segment all-time bests ─────────────────────────────────────────────────────
+
+const getSegmentAllTimeBests = (segmentId) =>
+  db.prepare(`
+    SELECT se.rider_id, r.name,
+           MIN(se.elapsed_time_s) AS best_time,
+           COUNT(se.id) AS effort_count,
+           MIN(date(se.start_date)) AS first_date,
+           MAX(date(se.start_date)) AS last_date
+    FROM segment_efforts se JOIN riders r ON r.id = se.rider_id
+    WHERE se.segment_id = ?
+    GROUP BY se.rider_id
+    ORDER BY best_time
+  `).all(segmentId);
+
+// ── Rider segment history ──────────────────────────────────────────────────────
+
+const getRiderSegmentHistory = (riderId, segmentId) =>
+  db.prepare(`
+    SELECT se.id, date(se.start_date) AS ride_date, se.elapsed_time_s,
+           (SELECT MIN(elapsed_time_s) FROM segment_efforts se2
+            WHERE se2.segment_id = ? AND se2.rider_id = ?
+            AND date(se2.start_date) <= date(se.start_date)) AS rolling_best
+    FROM segment_efforts se
+    WHERE se.segment_id = ? AND se.rider_id = ?
+    ORDER BY se.start_date
+  `).all(segmentId, riderId, segmentId, riderId);
+
+// ── Goals ──────────────────────────────────────────────────────────────────────
+
+const getGoals = (riderId = null) => {
+  const query = riderId
+    ? `SELECT g.*, s.name AS segment_name, s.category, s.distance_m,
+              r.name AS rider_name,
+              (SELECT MIN(elapsed_time_s) FROM segment_efforts
+               WHERE segment_id = g.segment_id AND rider_id = g.rider_id) AS current_best
+       FROM goals g
+       JOIN segments s ON s.id = g.segment_id
+       JOIN riders r ON r.id = g.rider_id
+       WHERE g.rider_id = ?
+       ORDER BY g.created_at DESC`
+    : `SELECT g.*, s.name AS segment_name, s.category, s.distance_m,
+              r.name AS rider_name,
+              (SELECT MIN(elapsed_time_s) FROM segment_efforts
+               WHERE segment_id = g.segment_id AND rider_id = g.rider_id) AS current_best
+       FROM goals g
+       JOIN segments s ON s.id = g.segment_id
+       JOIN riders r ON r.id = g.rider_id
+       ORDER BY g.created_at DESC`;
+  return riderId
+    ? db.prepare(query).all(riderId)
+    : db.prepare(query).all();
+};
+
+const createGoal = ({ riderId, segmentId, targetTimeS, deadline, notes }) =>
+  db.prepare(
+    'INSERT INTO goals (rider_id, segment_id, target_time_s, deadline, notes) VALUES (?, ?, ?, ?, ?)'
+  ).run(riderId, segmentId, targetTimeS, deadline || null, notes || null).lastInsertRowid;
+
+const updateGoal = (id, { targetTimeS, deadline, notes, achievedAt }) => {
+  const existing = db.prepare('SELECT * FROM goals WHERE id = ?').get(id);
+  if (!existing) return 0;
+  return db.prepare(
+    'UPDATE goals SET target_time_s=?, deadline=?, notes=?, achieved_at=? WHERE id=?'
+  ).run(
+    targetTimeS ?? existing.target_time_s,
+    deadline !== undefined ? (deadline || null) : existing.deadline,
+    notes !== undefined ? (notes || null) : existing.notes,
+    achievedAt !== undefined ? (achievedAt || null) : existing.achieved_at,
+    id
+  ).changes;
+};
+
+const deleteGoal = (id) =>
+  db.prepare('DELETE FROM goals WHERE id = ?').run(id).changes;
+
+// ── Push subscriptions ─────────────────────────────────────────────────────────
+
+const savePushSubscription = ({ riderId, endpoint, p256dh, auth }) => {
+  const existing = db.prepare('SELECT id FROM push_subscriptions WHERE endpoint = ?').get(endpoint);
+  if (existing) {
+    db.prepare('UPDATE push_subscriptions SET rider_id=?, p256dh=?, auth=? WHERE endpoint=?')
+      .run(riderId || null, p256dh, auth, endpoint);
+  } else {
+    db.prepare('INSERT INTO push_subscriptions (rider_id, endpoint, p256dh, auth) VALUES (?,?,?,?)')
+      .run(riderId || null, endpoint, p256dh, auth);
+  }
+};
+
+const deletePushSubscription = (endpoint) =>
+  db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint).changes;
+
+const getAllPushSubscriptions = () =>
+  db.prepare('SELECT * FROM push_subscriptions').all();
+
 module.exports = {
   db,
   getRiderById,
@@ -507,4 +860,23 @@ module.exports = {
   getClimbRanking,
   getGroupRides,
   getLeaderboard,
+  getGlobalStats,
+  getRecentFeed,
+  getMonthlyPoints,
+  getRiderProfile,
+  getEvents,
+  getEventById,
+  createEvent,
+  updateEvent,
+  deleteEvent,
+  getSegmentBadges,
+  getSegmentAllTimeBests,
+  getRiderSegmentHistory,
+  getGoals,
+  createGoal,
+  updateGoal,
+  deleteGoal,
+  savePushSubscription,
+  deletePushSubscription,
+  getAllPushSubscriptions,
 };

@@ -1,0 +1,33 @@
+# Railway deployment configuration
+# https://docs.railway.app/reference/config-as-code
+
+[build]
+  builder = "NIXPACKS"
+
+[deploy]
+  # ── Database persistence ──────────────────────────────────────────────────
+  # SQLite is written to the container filesystem which is wiped on each deploy.
+  # To persist the database across deployments:
+  #
+  # 1. In the Railway dashboard → your service → Volumes → "New Volume"
+  #    Mount path: /data
+  #
+  # 2. Add an environment variable in Railway:
+  #    DB_PATH = /data/bidon.sqlite
+  #
+  # That's it. The volume survives redeploys and the app will read/write
+  # to /data/bidon.sqlite on every start.
+  #
+  # ── Strava webhook ────────────────────────────────────────────────────────
+  # To enable automatic sync without manual backfills:
+  #
+  # 1. Add env var: STRAVA_WEBHOOK_VERIFY_TOKEN = <any secret string>
+  #
+  # 2. Register the webhook with Strava once (run this from your terminal):
+  #    curl -X POST https://www.strava.com/api/v3/push_subscriptions \
+  #      -F client_id=YOUR_CLIENT_ID \
+  #      -F client_secret=YOUR_CLIENT_SECRET \
+  #      -F callback_url=https://YOUR_RAILWAY_DOMAIN/api/webhook/strava \
+  #      -F verify_token=YOUR_VERIFY_TOKEN
+  #
+  # New rides will then sync automatically within seconds of being uploaded.
